@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "testex": {
+      "command": "node",
+      "args": ["dist/cli/index.js", "mcp"],
+      "description": "Local AI index for data-test IDs and React UI components"
+    }
+  }
+}

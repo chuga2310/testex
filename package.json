@@ -1,0 +1,32 @@
+{
+  "name": "testex",
+  "version": "0.1.0",
+  "description": "Local-first AI indexing for data-test attributes and React UI components",
+  "type": "module",
+  "bin": { "testex": "dist/cli/index.js" },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/cli/index.ts",
+    "download-model": "node scripts/download-model.mjs",
+    "prepare": "npm run build",
+    "postinstall": "node scripts/download-model.mjs",
+    "test": "node --experimental-vm-modules node_modules/.bin/jest"
+  },
+  "dependencies": {
+    "@lancedb/lancedb": "^0.8.0",
+    "@modelcontextprotocol/sdk": "^1.5.0",
+    "@xenova/transformers": "^2.17.2",
+    "chokidar": "^3.6.0",
+    "commander": "^12.1.0",
+    "dotenv": "^16.4.5",
+    "fastify": "^4.27.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.5.0"
+  },
+  "keywords": ["testing", "playwright", "react", "mcp", "data-test", "ai", "local"],
+  "license": "MIT",
+  "repository": { "type": "git", "url": "https://github.com/cuonglm/testex" }
+}

@@ -1,0 +1,9 @@
+<div data-test="login-form-container">
+  <h1>Login</h1>
+  <form data-test="login-form" (ngSubmit)="handleSubmit()">
+    <input data-testid="login-email-input" type="email" [(ngModel)]="email" />
+    <input data-testid="login-password-input" type="password" [(ngModel)]="password" />
+    <button data-test="login-submit-btn" type="submit" (click)="handleSubmit()">Login</button>
+  </form>
+  <div data-test="login-error" *ngIf="error">{{ error }}</div>
+</div>
