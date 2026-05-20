@@ -17,17 +17,40 @@ function pipeline(): EmbeddingPipeline {
   return _pipeline;
 }
 
+/** Wrap any tool handler so unhandled errors return a clean MCP error text
+ *  instead of crashing the entire server process. */
+function safe<T extends object>(
+  fn: (args: T) => Promise<{ content: { type: "text"; text: string }[] }>
+): (args: T) => Promise<{ content: { type: "text"; text: string }[] }> {
+  return async (args: T) => {
+    try {
+      return await fn(args);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      return {
+        content: [{ type: "text", text: JSON.stringify({ error: message }) }],
+      };
+    }
+  };
+}
+
+/** Clamp L2-distance-based score to a [0, 1] similarity value. */
+function toSimilarity(distance: number): number {
+  return Math.round(Math.max(0, Math.min(1, 1 - distance)) * 10000) / 10000;
+}
+
 export async function startMcpServer(): Promise<void> {
   const server = new McpServer({
     name: "testex",
     version: "0.1.0",
   });
 
+  // ── search_components ────────────────────────────────────────────────────
   server.tool(
     "search_components",
     "Find UI components by natural language description",
     { query: z.string(), limit: z.number().optional() },
-    async ({ query, limit = 10 }) => {
+    safe(async ({ query, limit = 10 }) => {
       const vec = await pipeline().embedOne(query);
       const results = await store().search(vec, limit);
       return {
@@ -47,22 +70,42 @@ export async function startMcpServer(): Promise<void> {
           },
         ],
       };
-    }
+    })
   );
 
+  // ── search_test_ids ───────────────────────────────────────────────────────
   server.tool(
     "search_test_ids",
-    "Find data-test IDs by keyword or semantic query",
-    { query: z.string(), limit: z.number().optional() },
-    async ({ query, limit = 20 }) => {
-      const exact = await store().searchByTestId(query);
-      if (exact.length) {
+    "Find data-test IDs by keyword or semantic query. Use exact=true for substring match.",
+    { query: z.string(), limit: z.number().optional(), exact: z.boolean().optional() },
+    safe(async ({ query, limit = 20, exact = false }) => {
+      if (exact) {
+        const records = await store().searchByTestId(query);
         return {
           content: [
             {
               type: "text",
               text: JSON.stringify(
-                exact.slice(0, limit).map((r) => ({
+                records.slice(0, limit).map((r) => ({
+                  component: r.name,
+                  file: r.file,
+                  test_ids: r.dataTestIds,
+                  match_type: "exact",
+                }))
+              ),
+            },
+          ],
+        };
+      }
+      // Try exact first, fall back to semantic
+      const exact_records = await store().searchByTestId(query);
+      if (exact_records.length) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(
+                exact_records.slice(0, limit).map((r) => ({
                   component: r.name,
                   file: r.file,
                   test_ids: r.dataTestIds,
@@ -93,14 +136,67 @@ export async function startMcpServer(): Promise<void> {
           },
         ],
       };
-    }
+    })
   );
 
+  // ── search_multi ──────────────────────────────────────────────────────────
+  server.tool(
+    "search_multi",
+    "Union search: embed each keyword separately and merge best-score results. Use when keywords are unrelated (e.g. login + checkout).",
+    { keywords: z.array(z.string()).min(2), limit: z.number().optional() },
+    safe(async ({ keywords, limit = 10 }) => {
+      const vecs = await pipeline().embedBatch(keywords);
+      const results = await store().searchMulti(vecs, limit);
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(
+              results.map((r) => ({
+                name: r.record.name,
+                file: r.record.file,
+                route: r.record.route,
+                data_test_ids: r.record.dataTestIds,
+                score: Math.round(r.score * 10000) / 10000,
+              }))
+            ),
+          },
+        ],
+      };
+    })
+  );
+
+  // ── search_must ───────────────────────────────────────────────────────────
+  server.tool(
+    "search_must",
+    "AND filter: return only components that contain ALL of the specified test IDs.",
+    { test_ids: z.array(z.string()).min(1), limit: z.number().optional() },
+    safe(async ({ test_ids, limit = 10 }) => {
+      const records = await store().searchByAllTestIds(test_ids);
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(
+              records.slice(0, limit).map((r) => ({
+                name: r.name,
+                file: r.file,
+                route: r.route,
+                data_test_ids: r.dataTestIds,
+              }))
+            ),
+          },
+        ],
+      };
+    })
+  );
+
+  // ── get_user_flow ─────────────────────────────────────────────────────────
   server.tool(
     "get_user_flow",
     "Get all components and test IDs for a page or route",
     { page: z.string() },
-    async ({ page }) => {
+    safe(async ({ page }) => {
       const route = page.startsWith("/") ? page : `/${page}`;
       let records = await store().getByRoute(route);
       if (!records.length) {
@@ -124,14 +220,15 @@ export async function startMcpServer(): Promise<void> {
           },
         ],
       };
-    }
+    })
   );
 
+  // ── generate_test_context ─────────────────────────────────────────────────
   server.tool(
     "generate_test_context",
     "Generate Playwright locators for a component",
     { component: z.string() },
-    async ({ component }) => {
+    safe(async ({ component }) => {
       const vec = await pipeline().embedOne(component);
       const results = await store().search(vec, 3);
       if (!results.length) {
@@ -168,14 +265,15 @@ export async function startMcpServer(): Promise<void> {
           { type: "text", text: JSON.stringify({ component, contexts }) },
         ],
       };
-    }
+    })
   );
 
+  // ── find_similar_components ───────────────────────────────────────────────
   server.tool(
     "find_similar_components",
     "Find semantically similar components",
     { component: z.string(), limit: z.number().optional() },
-    async ({ component, limit = 5 }) => {
+    safe(async ({ component, limit = 5 }) => {
       const vec = await pipeline().embedOne(component);
       const results = await store().search(vec, limit + 1);
       return {
@@ -192,20 +290,21 @@ export async function startMcpServer(): Promise<void> {
                   name: r.record.name,
                   file: r.record.file,
                   test_ids: r.record.dataTestIds,
-                  similarity: Math.round((1 - r.score) * 10000) / 10000,
+                  similarity: toSimilarity(r.score),
                 }))
             ),
           },
         ],
       };
-    }
+    })
   );
 
+  // ── explain_page_structure ────────────────────────────────────────────────
   server.tool(
     "explain_page_structure",
     "Analyze the UI structure and test coverage of a route",
     { route: z.string() },
-    async ({ route }) => {
+    safe(async ({ route }) => {
       let records = await store().getByRoute(route);
       if (!records.length) {
         const vec = await pipeline().embedOne(route);
@@ -231,26 +330,39 @@ export async function startMcpServer(): Promise<void> {
           },
         ],
       };
-    }
+    })
   );
 
+  // ── list_all_test_ids ─────────────────────────────────────────────────────
   server.tool(
     "list_all_test_ids",
-    "List all indexed data-test IDs",
-    {},
-    async () => {
+    "List indexed data-test IDs. Returns up to `limit` IDs (default 200). Use `offset` for pagination.",
+    { limit: z.number().optional(), offset: z.number().optional() },
+    safe(async ({ limit = 200, offset = 0 }) => {
       const ids = await store().allTestIds();
+      const page = ids.slice(offset, offset + limit);
       return {
-        content: [{ type: "text", text: JSON.stringify(ids) }],
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({
+              total: ids.length,
+              offset,
+              limit,
+              ids: page,
+            }),
+          },
+        ],
       };
-    }
+    })
   );
 
+  // ── index_stats ───────────────────────────────────────────────────────────
   server.tool(
     "index_stats",
     "Return index statistics",
     {},
-    async () => {
+    safe(async () => {
       const count = await store().count();
       const ids = await store().allTestIds();
       return {
@@ -266,7 +378,7 @@ export async function startMcpServer(): Promise<void> {
           },
         ],
       };
-    }
+    })
   );
 
   const transport = new StdioServerTransport();
