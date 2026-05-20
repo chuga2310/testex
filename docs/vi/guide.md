@@ -40,7 +40,7 @@ Không có network call sau khi `npm install`.
 ## 2. Cài đặt
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/testex
+git clone https://github.com/chuga2310/testex
 cd testex
 npm install
 ```

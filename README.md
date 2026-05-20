@@ -14,7 +14,7 @@ No cloud API. No Docker. ONNX model bundled (~32 MB). Runs on `npm install`.
 ## Quick start
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/testex
+git clone https://github.com/chuga2310/testex
 cd testex
 npm install                                    # builds + model ready
 
