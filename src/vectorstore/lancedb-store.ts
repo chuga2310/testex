@@ -1,51 +1,58 @@
 import { mkdirSync, existsSync } from "fs";
-import { ComponentRecord, SearchResult } from "../schema/models.js";
+import { ComponentRecord, SearchResult, scoreToConfidence } from "../schema/models.js";
 
 interface Row {
-  id: string;
-  type: string;
-  name: string;
-  file: string;
-  route: string;
-  framework: string;
+  id:            string;
+  type:          string;
+  name:          string;
+  file:          string;
+  route:         string;
+  framework:     string;
   data_test_ids: string;
-  aria_labels: string;
-  user_actions: string;
-  raw_text: string;
-  vector: number[];
+  aria_labels:   string;
+  user_actions:  string;
+  elements:      string;   // JSON: ElementInfo[]
+  raw_text:      string;
+  vector:        number[];
 }
 
 function toRow(rec: ComponentRecord, vector: number[]): Row {
   return {
-    id: rec.id,
-    type: rec.type,
-    name: rec.name,
-    file: rec.file,
-    route: rec.route ?? "",
-    framework: rec.framework,
+    id:            rec.id,
+    type:          rec.type,
+    name:          rec.name,
+    file:          rec.file,
+    route:         rec.route ?? "",
+    framework:     rec.framework,
     data_test_ids: JSON.stringify(rec.dataTestIds),
-    aria_labels: JSON.stringify(rec.ariaLabels),
-    user_actions: JSON.stringify(rec.userActions),
-    raw_text: rec.rawText.slice(0, 2000),
+    aria_labels:   JSON.stringify(rec.ariaLabels),
+    user_actions:  JSON.stringify(rec.userActions),
+    elements:      JSON.stringify(rec.elements ?? []),
+    raw_text:      rec.rawText.slice(0, 2000),
     vector,
   };
 }
 
 function fromRow(row: Row): ComponentRecord {
   return {
-    id: row.id,
-    type: row.type,
-    framework: row.framework,
-    name: row.name,
-    route: row.route || null,
-    file: row.file,
+    id:          row.id,
+    type:        row.type,
+    framework:   row.framework,
+    name:        row.name,
+    route:       row.route || null,
+    file:        row.file,
     dataTestIds: JSON.parse(row.data_test_ids) as string[],
-    ariaLabels: JSON.parse(row.aria_labels) as string[],
-    relatedApi: [],
-    children: [],
-    userActions: JSON.parse(row.user_actions) as string[],
-    rawText: row.raw_text,
+    ariaLabels:  JSON.parse(row.aria_labels)   as string[],
+    relatedApi:  [],
+    children:    [],
+    userActions: JSON.parse(row.user_actions)  as string[],
+    elements:    JSON.parse(row.elements ?? "[]"),
+    rawText:     row.raw_text,
   };
+}
+
+function confidence(distance: number): "high" | "medium" | "low" {
+  return scoreToConfidence(distance);
 }
 
 const TABLE_NAME = "components";
@@ -75,7 +82,6 @@ export class LanceDBStore {
     if (names.includes(TABLE_NAME)) {
       this.table = await db.openTable(TABLE_NAME);
     } else if (create) {
-      // Cannot create empty table; caller must provide initial data
       this.table = null;
     }
     return this.table;
@@ -99,17 +105,14 @@ export class LanceDBStore {
     } else {
       const tbl = await db.openTable(TABLE_NAME);
       const ids = rows.map((r) => `'${r.id}'`).join(", ");
-      try {
-        await tbl.delete(`id IN (${ids})`);
-      } catch {
-        // ignore if rows don't exist yet
-      }
+      try { await tbl.delete(`id IN (${ids})`); } catch { /* new rows */ }
       await tbl.add(rows);
       this.table = tbl;
     }
     return rows.length;
   }
 
+  // ── semantic search ──────────────────────────────────────────────────────
   async search(queryVec: number[], limit = 10): Promise<SearchResult[]> {
     const tbl = await this.getTable() as {
       search(vec: number[]): { limit(n: number): { toArray(): Promise<(Row & { _distance: number })[]> } };
@@ -118,105 +121,113 @@ export class LanceDBStore {
     try {
       const results = await tbl.search(queryVec).limit(limit).toArray();
       return results.map((r) => ({
-        record: fromRow(r),
-        score: r._distance ?? 0,
+        record:     fromRow(r),
+        score:      r._distance ?? 0,
+        confidence: confidence(r._distance ?? 0),
+        matchType:  "semantic" as const,
       }));
-    } catch {
-      return [];
-    }
+    } catch { return []; }
   }
 
-  /** Multi-keyword union search: embed each keyword separately, merge by best score. */
+  // ── multi-keyword union search ───────────────────────────────────────────
   async searchMulti(queryVecs: number[][], limit = 10): Promise<SearchResult[]> {
     const seen = new Map<string, SearchResult>();
     for (const vec of queryVecs) {
       const results = await this.search(vec, limit);
       for (const r of results) {
         const existing = seen.get(r.record.id);
-        // keep the best (lowest) distance score
-        if (!existing || r.score < existing.score) {
-          seen.set(r.record.id, r);
-        }
+        if (!existing || r.score < existing.score) seen.set(r.record.id, r);
       }
     }
     return [...seen.values()].sort((a, b) => a.score - b.score).slice(0, limit);
   }
 
-  /** AND filter: returns components containing ALL of the given test IDs. */
+  // ── exact test-id substring match ────────────────────────────────────────
+  async searchByTestId(testId: string): Promise<ComponentRecord[]> {
+    const tbl = await this.getTable() as {
+      query(): { where(c: string): { toArray(): Promise<Row[]> } };
+    } | null;
+    if (!tbl) return [];
+    try {
+      const rows = await tbl.query().where(`data_test_ids LIKE '%${testId}%'`).toArray();
+      return rows.map(fromRow);
+    } catch { return []; }
+  }
+
+  // ── AND filter: ALL test IDs must be present ─────────────────────────────
   async searchByAllTestIds(testIds: string[]): Promise<ComponentRecord[]> {
     if (!testIds.length) return [];
     const tbl = await this.getTable() as {
-      query(): { where(cond: string): { toArray(): Promise<Row[]> } };
+      query(): { where(c: string): { toArray(): Promise<Row[]> } };
     } | null;
     if (!tbl) return [];
     try {
-      const conditions = testIds
-        .map((id) => `data_test_ids LIKE '%${id}%'`)
-        .join(" AND ");
-      const rows = await tbl.query().where(conditions).toArray();
+      const conds = testIds.map((id) => `data_test_ids LIKE '%${id}%'`).join(" AND ");
+      const rows  = await tbl.query().where(conds).toArray();
       return rows.map(fromRow);
-    } catch {
-      return [];
-    }
+    } catch { return []; }
   }
 
-  async searchByTestId(testId: string): Promise<ComponentRecord[]> {
+  // ── list pages / routes ──────────────────────────────────────────────────
+  async listPages(limit = 50): Promise<ComponentRecord[]> {
     const tbl = await this.getTable() as {
-      query(): { where(cond: string): { toArray(): Promise<Row[]> } };
+      query(): { where(c: string): { toArray(): Promise<Row[]> } };
     } | null;
     if (!tbl) return [];
     try {
       const rows = await tbl
         .query()
-        .where(`data_test_ids LIKE '%${testId}%'`)
+        .where(`type = 'page' OR route != ''`)
         .toArray();
-      return rows.map(fromRow);
-    } catch {
-      return [];
-    }
+      return rows.slice(0, limit).map(fromRow);
+    } catch { return []; }
   }
 
+  // ── find by action ───────────────────────────────────────────────────────
+  async findByAction(action: string, limit = 20): Promise<ComponentRecord[]> {
+    const tbl = await this.getTable() as {
+      query(): { where(c: string): { toArray(): Promise<Row[]> } };
+    } | null;
+    if (!tbl) return [];
+    try {
+      const rows = await tbl
+        .query()
+        .where(`user_actions LIKE '%${action}%'`)
+        .toArray();
+      return rows.slice(0, limit).map(fromRow);
+    } catch { return []; }
+  }
+
+  // ── route lookup ─────────────────────────────────────────────────────────
   async getByRoute(route: string): Promise<ComponentRecord[]> {
     const tbl = await this.getTable() as {
-      query(): { where(cond: string): { toArray(): Promise<Row[]> } };
+      query(): { where(c: string): { toArray(): Promise<Row[]> } };
     } | null;
     if (!tbl) return [];
     try {
-      const rows = await tbl
-        .query()
-        .where(`route = '${route}'`)
-        .toArray();
+      const rows = await tbl.query().where(`route = '${route}'`).toArray();
       return rows.map(fromRow);
-    } catch {
-      return [];
-    }
+    } catch { return []; }
   }
 
+  // ── stats ────────────────────────────────────────────────────────────────
   async count(): Promise<number> {
     const tbl = await this.getTable() as { countRows(): Promise<number> } | null;
     if (!tbl) return 0;
-    try {
-      return await tbl.countRows();
-    } catch {
-      return 0;
-    }
+    try { return await tbl.countRows(); } catch { return 0; }
   }
 
   async allTestIds(): Promise<string[]> {
     const tbl = await this.getTable() as {
-      query(): { select(cols: string[]): { toArray(): Promise<{ data_test_ids: string }[]> } };
+      query(): { select(c: string[]): { toArray(): Promise<{ data_test_ids: string }[]> } };
     } | null;
     if (!tbl) return [];
     try {
       const rows = await tbl.query().select(["data_test_ids"]).toArray();
       const ids: string[] = [];
-      for (const row of rows) {
-        ids.push(...(JSON.parse(row.data_test_ids) as string[]));
-      }
+      for (const row of rows) ids.push(...(JSON.parse(row.data_test_ids) as string[]));
       return [...new Set(ids)];
-    } catch {
-      return [];
-    }
+    } catch { return []; }
   }
 
   async drop(): Promise<void> {
@@ -226,9 +237,7 @@ export class LanceDBStore {
       dropTable(name: string): Promise<void>;
     };
     const names = await db.tableNames();
-    if (names.includes(TABLE_NAME)) {
-      await db.dropTable(TABLE_NAME);
-    }
+    if (names.includes(TABLE_NAME)) await db.dropTable(TABLE_NAME);
     this.table = null;
   }
 }

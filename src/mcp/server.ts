@@ -4,6 +4,11 @@ import { z } from "zod";
 import { config } from "../config.js";
 import { EmbeddingPipeline } from "../embeddings/pipeline.js";
 import { LanceDBStore } from "../vectorstore/lancedb-store.js";
+import {
+  deriveTestFlow,
+  generatePlaywrightSnippet,
+  type ComponentRecord,
+} from "../schema/models.js";
 
 let _store: LanceDBStore | null = null;
 let _pipeline: EmbeddingPipeline | null = null;
@@ -17,8 +22,6 @@ function pipeline(): EmbeddingPipeline {
   return _pipeline;
 }
 
-/** Wrap any tool handler so unhandled errors return a clean MCP error text
- *  instead of crashing the entire server process. */
 function safe<T extends object>(
   fn: (args: T) => Promise<{ content: { type: "text"; text: string }[] }>
 ): (args: T) => Promise<{ content: { type: "text"; text: string }[] }> {
@@ -27,23 +30,17 @@ function safe<T extends object>(
       return await fn(args);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
-      return {
-        content: [{ type: "text", text: JSON.stringify({ error: message }) }],
-      };
+      return { content: [{ type: "text", text: JSON.stringify({ error: message }) }] };
     }
   };
 }
 
-/** Clamp L2-distance-based score to a [0, 1] similarity value. */
-function toSimilarity(distance: number): number {
+function clampSimilarity(distance: number): number {
   return Math.round(Math.max(0, Math.min(1, 1 - distance)) * 10000) / 10000;
 }
 
 export async function startMcpServer(): Promise<void> {
-  const server = new McpServer({
-    name: "testex",
-    version: "0.1.0",
-  });
+  const server = new McpServer({ name: "testex", version: "0.1.0" });
 
   // ── search_components ────────────────────────────────────────────────────
   server.tool(
@@ -51,24 +48,21 @@ export async function startMcpServer(): Promise<void> {
     "Find UI components by natural language description",
     { query: z.string(), limit: z.number().optional() },
     safe(async ({ query, limit = 10 }) => {
-      const vec = await pipeline().embedOne(query);
+      const vec     = await pipeline().embedOne(query);
       const results = await store().search(vec, limit);
       return {
-        content: [
-          {
-            type: "text",
-            text: JSON.stringify(
-              results.map((r) => ({
-                name: r.record.name,
-                file: r.record.file,
-                route: r.record.route,
-                data_test_ids: r.record.dataTestIds,
-                user_actions: r.record.userActions,
-                score: Math.round(r.score * 10000) / 10000,
-              }))
-            ),
-          },
-        ],
+        content: [{
+          type: "text",
+          text: JSON.stringify(results.map((r) => ({
+            name:          r.record.name,
+            file:          r.record.file,
+            route:         r.record.route,
+            data_test_ids: r.record.dataTestIds,
+            user_actions:  r.record.userActions,
+            confidence:    r.confidence,
+            score:         Math.round(r.score * 10000) / 10000,
+          }))),
+        }],
       };
     })
   );
@@ -79,62 +73,39 @@ export async function startMcpServer(): Promise<void> {
     "Find data-test IDs by keyword or semantic query. Use exact=true for substring match.",
     { query: z.string(), limit: z.number().optional(), exact: z.boolean().optional() },
     safe(async ({ query, limit = 20, exact = false }) => {
-      if (exact) {
-        const records = await store().searchByTestId(query);
+      const exactRecords = await store().searchByTestId(query);
+      if (exact || exactRecords.length) {
         return {
-          content: [
-            {
-              type: "text",
-              text: JSON.stringify(
-                records.slice(0, limit).map((r) => ({
-                  component: r.name,
-                  file: r.file,
-                  test_ids: r.dataTestIds,
-                  match_type: "exact",
-                }))
-              ),
-            },
-          ],
+          content: [{
+            type: "text",
+            text: JSON.stringify(exactRecords.slice(0, limit).map((r) => ({
+              component:  r.name,
+              file:       r.file,
+              test_ids:   r.dataTestIds,
+              match_type: "exact",
+              confidence: "high",
+            }))),
+          }],
         };
       }
-      // Try exact first, fall back to semantic
-      const exact_records = await store().searchByTestId(query);
-      if (exact_records.length) {
-        return {
-          content: [
-            {
-              type: "text",
-              text: JSON.stringify(
-                exact_records.slice(0, limit).map((r) => ({
-                  component: r.name,
-                  file: r.file,
-                  test_ids: r.dataTestIds,
-                  match_type: "exact",
-                }))
-              ),
-            },
-          ],
-        };
-      }
-      const vec = await pipeline().embedOne(query);
+      const vec     = await pipeline().embedOne(query);
       const results = await store().search(vec, limit);
       return {
-        content: [
-          {
-            type: "text",
-            text: JSON.stringify(
-              results
-                .filter((r) => r.record.dataTestIds.length)
-                .map((r) => ({
-                  component: r.record.name,
-                  file: r.record.file,
-                  test_ids: r.record.dataTestIds,
-                  match_type: "semantic",
-                  score: Math.round(r.score * 10000) / 10000,
-                }))
-            ),
-          },
-        ],
+        content: [{
+          type: "text",
+          text: JSON.stringify(
+            results
+              .filter((r) => r.record.dataTestIds.length)
+              .map((r) => ({
+                component:  r.record.name,
+                file:       r.record.file,
+                test_ids:   r.record.dataTestIds,
+                match_type: "semantic",
+                confidence: r.confidence,
+                score:      Math.round(r.score * 10000) / 10000,
+              }))
+          ),
+        }],
       };
     })
   );
@@ -145,23 +116,20 @@ export async function startMcpServer(): Promise<void> {
     "Union search: embed each keyword separately and merge best-score results. Use when keywords are unrelated (e.g. login + checkout).",
     { keywords: z.array(z.string()).min(2), limit: z.number().optional() },
     safe(async ({ keywords, limit = 10 }) => {
-      const vecs = await pipeline().embedBatch(keywords);
+      const vecs    = await pipeline().embedBatch(keywords);
       const results = await store().searchMulti(vecs, limit);
       return {
-        content: [
-          {
-            type: "text",
-            text: JSON.stringify(
-              results.map((r) => ({
-                name: r.record.name,
-                file: r.record.file,
-                route: r.record.route,
-                data_test_ids: r.record.dataTestIds,
-                score: Math.round(r.score * 10000) / 10000,
-              }))
-            ),
-          },
-        ],
+        content: [{
+          type: "text",
+          text: JSON.stringify(results.map((r) => ({
+            name:          r.record.name,
+            file:          r.record.file,
+            route:         r.record.route,
+            data_test_ids: r.record.dataTestIds,
+            confidence:    r.confidence,
+            score:         Math.round(r.score * 10000) / 10000,
+          }))),
+        }],
       };
     })
   );
@@ -174,19 +142,160 @@ export async function startMcpServer(): Promise<void> {
     safe(async ({ test_ids, limit = 10 }) => {
       const records = await store().searchByAllTestIds(test_ids);
       return {
-        content: [
-          {
+        content: [{
+          type: "text",
+          text: JSON.stringify(records.slice(0, limit).map((r) => ({
+            name:          r.name,
+            file:          r.file,
+            route:         r.route,
+            data_test_ids: r.dataTestIds,
+          }))),
+        }],
+      };
+    })
+  );
+
+  // ── list_pages ─────────────────────────────────────────────────────────────
+  server.tool(
+    "list_pages",
+    "List all indexed pages and routes. Good starting point for agents exploring a project.",
+    { limit: z.number().optional() },
+    safe(async ({ limit = 50 }) => {
+      const records = await store().listPages(limit);
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify(records.map((r) => ({
+            name:           r.name,
+            route:          r.route,
+            file:           r.file,
+            test_ids_count: r.dataTestIds.length,
+            test_ids:       r.dataTestIds,
+            frameworks:     r.framework,
+          }))),
+        }],
+      };
+    })
+  );
+
+  // ── find_by_action ────────────────────────────────────────────────────────
+  server.tool(
+    "find_by_action",
+    "Find components by interaction type: click | submit | fill | check | navigate",
+    {
+      action: z.enum(["click", "submit", "fill", "check", "navigate"]),
+      limit:  z.number().optional(),
+    },
+    safe(async ({ action, limit = 10 }) => {
+      const records = await store().findByAction(action, limit);
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify(records.map((r) => ({
+            name:          r.name,
+            route:         r.route,
+            file:          r.file,
+            data_test_ids: r.dataTestIds,
+            elements:      r.elements.filter((e) => {
+              if (action === "click")    return e.tag === "button" || e.tag === "a";
+              if (action === "submit")   return e.inputType === "submit" || (e.tag === "button" && !e.inputType);
+              if (action === "fill")     return e.tag === "input" || e.tag === "textarea";
+              if (action === "check")    return e.inputType === "checkbox" || e.inputType === "radio";
+              return true;
+            }),
+          }))),
+        }],
+      };
+    })
+  );
+
+  // ── get_test_plan ─────────────────────────────────────────────────────────
+  server.tool(
+    "get_test_plan",
+    "ONE-SHOT: full test plan for a page — route, ordered test flow, all test IDs with element context, and a ready Playwright snippet.",
+    { page: z.string() },
+    safe(async ({ page }) => {
+      const route = page.startsWith("/") ? page : `/${page}`;
+      let records = await store().getByRoute(route);
+      if (!records.length) {
+        const vec     = await pipeline().embedOne(page);
+        const results = await store().search(vec, 5);
+        records = results
+          .filter((r) => r.record.route || r.record.elements.length > 0)
+          .map((r) => r.record);
+      }
+      if (!records.length) {
+        return {
+          content: [{
             type: "text",
-            text: JSON.stringify(
-              records.slice(0, limit).map((r) => ({
-                name: r.name,
-                file: r.file,
-                route: r.route,
-                data_test_ids: r.dataTestIds,
-              }))
-            ),
-          },
-        ],
+            text: JSON.stringify({ error: `No components found for "${page}". Run testex index first.` }),
+          }],
+        };
+      }
+
+      const primary     = records[0];
+      const allElements = records.flatMap((r) => r.elements);
+      const allTestIds  = [...new Set(records.flatMap((r) => r.dataTestIds))];
+      const testFlow    = deriveTestFlow(allElements);
+      const snippet     = generatePlaywrightSnippet({
+        ...primary,
+        elements: allElements,
+        dataTestIds: allTestIds,
+        route: primary.route ?? route,
+      } as ComponentRecord);
+
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify({
+            page,
+            route:              primary.route ?? route,
+            components:         records.map((r) => r.name),
+            files:              records.map((r) => r.file),
+            all_test_ids:       allTestIds,
+            elements:           allElements,
+            test_flow:          testFlow,
+            playwright_snippet: snippet,
+          }),
+        }],
+      };
+    })
+  );
+
+  // ── generate_playwright_test ──────────────────────────────────────────────
+  server.tool(
+    "generate_playwright_test",
+    "Generate a ready-to-run Playwright test file for a component or page.",
+    { component: z.string(), route: z.string().optional() },
+    safe(async ({ component, route: routeOverride }) => {
+      const vec     = await pipeline().embedOne(component);
+      const results = await store().search(vec, 3);
+      if (!results.length) {
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({ error: "No components found. Run testex index first." }),
+          }],
+        };
+      }
+      const record: ComponentRecord = {
+        ...results[0].record,
+        route: routeOverride ?? results[0].record.route,
+      };
+      const testFlow = deriveTestFlow(record.elements);
+      const snippet  = generatePlaywrightSnippet(record);
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify({
+            component:       record.name,
+            file:            record.file,
+            route:           record.route,
+            confidence:      results[0].confidence,
+            test_flow:       testFlow,
+            playwright_test: snippet,
+          }),
+        }],
       };
     })
   );
@@ -197,28 +306,26 @@ export async function startMcpServer(): Promise<void> {
     "Get all components and test IDs for a page or route",
     { page: z.string() },
     safe(async ({ page }) => {
-      const route = page.startsWith("/") ? page : `/${page}`;
-      let records = await store().getByRoute(route);
+      const route   = page.startsWith("/") ? page : `/${page}`;
+      let records   = await store().getByRoute(route);
       if (!records.length) {
-        const vec = await pipeline().embedOne(page);
+        const vec     = await pipeline().embedOne(page);
         const results = await store().search(vec, 5);
         records = results.filter((r) => r.record.route).map((r) => r.record);
       }
       return {
-        content: [
-          {
-            type: "text",
-            text: JSON.stringify({
-              page,
-              components: records.map((r) => ({
-                name: r.name,
-                route: r.route,
-                test_ids: r.dataTestIds,
-                actions: r.userActions,
-              })),
-            }),
-          },
-        ],
+        content: [{
+          type: "text",
+          text: JSON.stringify({
+            page,
+            components: records.map((r) => ({
+              name:      r.name,
+              route:     r.route,
+              test_ids:  r.dataTestIds,
+              actions:   r.userActions,
+            })),
+          }),
+        }],
       };
     })
   );
@@ -229,41 +336,39 @@ export async function startMcpServer(): Promise<void> {
     "Generate Playwright locators for a component",
     { component: z.string() },
     safe(async ({ component }) => {
-      const vec = await pipeline().embedOne(component);
+      const vec     = await pipeline().embedOne(component);
       const results = await store().search(vec, 3);
       if (!results.length) {
         return {
-          content: [
-            {
-              type: "text",
-              text: JSON.stringify({
-                error: 'No components found. Run "testex index <path>" first.',
-              }),
-            },
-          ],
+          content: [{
+            type: "text",
+            text: JSON.stringify({ error: 'No components found. Run "testex index <path>" first.' }),
+          }],
         };
       }
       const contexts = results.map(({ record: r }) => {
         const locators: string[] = [];
-        for (const id of r.dataTestIds) {
-          locators.push(`page.getByTestId("${id}")`);
-          locators.push(`page.locator('[data-testid="${id}"]')`);
-        }
-        for (const label of r.ariaLabels) {
-          locators.push(`page.getByRole("*", { name: "${label}" })`);
+        for (const el of r.elements) {
+          locators.push(`page.getByTestId('${el.testId}')`);
+          if (el.text && (el.tag === "button" || el.tag === "a"))
+            locators.push(`page.getByRole('${el.tag}', { name: '${el.text}' })`);
+          if (el.placeholder)
+            locators.push(`page.getByPlaceholder('${el.placeholder}')`);
+          if (el.ariaLabel)
+            locators.push(`page.getByLabel('${el.ariaLabel}')`);
         }
         return {
-          component: r.name,
-          file: r.file,
-          route: r.route,
-          locators,
-          suggested_actions: r.userActions,
+          component:          r.name,
+          file:               r.file,
+          route:              r.route,
+          confidence:         results[0].confidence,
+          locators:           [...new Set(locators)],
+          suggested_actions:  r.userActions,
+          test_flow:          deriveTestFlow(r.elements),
         };
       });
       return {
-        content: [
-          { type: "text", text: JSON.stringify({ component, contexts }) },
-        ],
+        content: [{ type: "text", text: JSON.stringify({ component, contexts }) }],
       };
     })
   );
@@ -274,27 +379,24 @@ export async function startMcpServer(): Promise<void> {
     "Find semantically similar components",
     { component: z.string(), limit: z.number().optional() },
     safe(async ({ component, limit = 5 }) => {
-      const vec = await pipeline().embedOne(component);
+      const vec     = await pipeline().embedOne(component);
       const results = await store().search(vec, limit + 1);
       return {
-        content: [
-          {
-            type: "text",
-            text: JSON.stringify(
-              results
-                .filter(
-                  (r) => r.record.name.toLowerCase() !== component.toLowerCase()
-                )
-                .slice(0, limit)
-                .map((r) => ({
-                  name: r.record.name,
-                  file: r.record.file,
-                  test_ids: r.record.dataTestIds,
-                  similarity: toSimilarity(r.score),
-                }))
-            ),
-          },
-        ],
+        content: [{
+          type: "text",
+          text: JSON.stringify(
+            results
+              .filter((r) => r.record.name.toLowerCase() !== component.toLowerCase())
+              .slice(0, limit)
+              .map((r) => ({
+                name:       r.record.name,
+                file:       r.record.file,
+                test_ids:   r.record.dataTestIds,
+                similarity: clampSimilarity(r.score),
+                confidence: r.confidence,
+              }))
+          ),
+        }],
       };
     })
   );
@@ -307,28 +409,25 @@ export async function startMcpServer(): Promise<void> {
     safe(async ({ route }) => {
       let records = await store().getByRoute(route);
       if (!records.length) {
-        const vec = await pipeline().embedOne(route);
+        const vec     = await pipeline().embedOne(route);
         const results = await store().search(vec, 5);
         records = results.map((r) => r.record);
       }
       const allTestIds = records.flatMap((r) => r.dataTestIds);
       const allActions = [...new Set(records.flatMap((r) => r.userActions))];
       return {
-        content: [
-          {
-            type: "text",
-            text: JSON.stringify({
-              route,
-              components: records.map((r) => r.name),
-              total_test_ids: allTestIds.length,
-              test_ids: allTestIds,
-              available_actions: allActions,
-              files: records.map((r) => r.file),
-              test_coverage:
-                allTestIds.length > 3 ? "good" : "needs_improvement",
-            }),
-          },
-        ],
+        content: [{
+          type: "text",
+          text: JSON.stringify({
+            route,
+            components:       records.map((r) => r.name),
+            total_test_ids:   allTestIds.length,
+            test_ids:         allTestIds,
+            available_actions: allActions,
+            files:            records.map((r) => r.file),
+            test_coverage:    allTestIds.length > 3 ? "good" : "needs_improvement",
+          }),
+        }],
       };
     })
   );
@@ -339,20 +438,13 @@ export async function startMcpServer(): Promise<void> {
     "List indexed data-test IDs. Returns up to `limit` IDs (default 200). Use `offset` for pagination.",
     { limit: z.number().optional(), offset: z.number().optional() },
     safe(async ({ limit = 200, offset = 0 }) => {
-      const ids = await store().allTestIds();
+      const ids  = await store().allTestIds();
       const page = ids.slice(offset, offset + limit);
       return {
-        content: [
-          {
-            type: "text",
-            text: JSON.stringify({
-              total: ids.length,
-              offset,
-              limit,
-              ids: page,
-            }),
-          },
-        ],
+        content: [{
+          type: "text",
+          text: JSON.stringify({ total: ids.length, offset, limit, ids: page }),
+        }],
       };
     })
   );
@@ -364,19 +456,17 @@ export async function startMcpServer(): Promise<void> {
     {},
     safe(async () => {
       const count = await store().count();
-      const ids = await store().allTestIds();
+      const ids   = await store().allTestIds();
       return {
-        content: [
-          {
-            type: "text",
-            text: JSON.stringify({
-              total_components: count,
-              total_test_ids: ids.length,
-              db_path: config.dbPath,
-              embedding_model: config.embeddingModel,
-            }),
-          },
-        ],
+        content: [{
+          type: "text",
+          text: JSON.stringify({
+            total_components: count,
+            total_test_ids:   ids.length,
+            db_path:          config.dbPath,
+            embedding_model:  config.embeddingModel,
+          }),
+        }],
       };
     })
   );

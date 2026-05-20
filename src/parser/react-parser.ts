@@ -5,6 +5,7 @@ import { ComponentRecord } from "../schema/models.js";
 import { parseVueFile } from "./vue-parser.js";
 import { parseSvelteFile } from "./svelte-parser.js";
 import { parseHtmlFile } from "./html-parser.js";
+import { extractElementInfos } from "./base.js";
 
 
 // ── Regex patterns (ported from Python) ─────────────────────────────────────
@@ -208,6 +209,7 @@ export function parseFile(
       relatedApi: [],
       children: [],
       userActions: actions,
+      elements: extractElementInfos(content, dataTestAttrs),
       rawText: content.slice(0, 1000),
     },
   ];

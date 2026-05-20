@@ -5,6 +5,7 @@ import {
   extractAriaLabels,
   extractRoutes,
   nameFromFile,
+  extractElementInfos,
 } from "./base.js";
 
 // Svelte action patterns: on:click, on:submit
@@ -65,6 +66,7 @@ export function parseSvelteFile(
     relatedApi: [],
     children: [],
     userActions: actions,
+    elements: extractElementInfos(template, dataTestAttrs),
     rawText: content.slice(0, 1000),
   };
 }

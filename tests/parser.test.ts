@@ -96,5 +96,60 @@ console.log("\n── scanDirectory (multi-framework) ────────�
   assert(frameworks.includes("angular"), "angular found");
 }
 
+console.log("\n── ElementInfo: React LoginForm ────────────");
+{
+  const [rec] = parseFile(join(EXAMPLES, "LoginForm.tsx"));
+  assert(rec.elements.length > 0, "has elements");
+  const emailEl = rec.elements.find((e) => e.testId === "login-email-input");
+  assert(!!emailEl, "email element found");
+  assert(emailEl?.tag === "input", "email tag = input");
+  assert(emailEl?.inputType === "email", "email inputType = email");
+  assert(emailEl?.placeholder === "Email", "email placeholder = Email");
+  assert(emailEl?.ariaLabel === "Email address", "email ariaLabel set");
+  const submitEl = rec.elements.find((e) => e.testId === "login-submit-button");
+  assert(!!submitEl, "submit element found");
+  assert(submitEl?.tag === "button", "submit tag = button");
+  assert(submitEl?.text === "Sign In", "submit text = Sign In");
+}
+
+console.log("\n── ElementInfo: Vue LoginForm ──────────────");
+{
+  const [rec] = parseFile(join(EXAMPLES, "LoginForm.vue"));
+  const submitEl = rec.elements.find((e) => e.testId === "login-submit-btn");
+  assert(!!submitEl, "Vue submit element found");
+  assert(submitEl?.tag === "button", "Vue submit tag = button");
+}
+
+console.log("\n── deriveTestFlow ──────────────────────────");
+{
+  const { deriveTestFlow } = await import("../src/schema/models.js");
+  const [rec] = parseFile(join(EXAMPLES, "LoginForm.tsx"));
+  const flow = deriveTestFlow(rec.elements);
+  assert(flow.length > 0, "flow has steps");
+  const fillSteps  = flow.filter((s) => s.action === "fill");
+  const clickSteps = flow.filter((s) => s.action === "click");
+  assert(fillSteps.length >= 2,  "at least 2 fill steps");
+  assert(clickSteps.length >= 1, "at least 1 click step");
+  const emailStep = flow.find((s) => s.testId === "login-email-input");
+  assert(emailStep?.value === "test@example.com", "email step has test value");
+  const pwStep    = flow.find((s) => s.testId === "login-password-input");
+  assert(pwStep?.value === "TestPassword123!", "password step has test value");
+  // email must come before password (order check)
+  assert((emailStep?.step ?? 99) < (pwStep?.step ?? 0), "email step before password step");
+}
+
+console.log("\n── generatePlaywrightSnippet ───────────────");
+{
+  const { generatePlaywrightSnippet } = await import("../src/schema/models.js");
+  const [rec] = parseFile(join(EXAMPLES, "LoginForm.tsx"));
+  const snippet = generatePlaywrightSnippet(rec);
+  assert(snippet.includes("import { test, expect }"), "has playwright import");
+  assert(snippet.includes("login-email-input"), "snippet has email testId");
+  assert(snippet.includes("login-submit-button"), "snippet has submit testId");
+  assert(snippet.includes("test@example.com"), "snippet has email test value");
+  assert(snippet.includes(".fill("), "snippet uses .fill()");
+  assert(snippet.includes(".click("), "snippet uses .click()");
+}
+
 console.log(`\n${passed + failed} tests — ${passed} passed, ${failed} failed\n`);
 if (failed > 0) process.exit(1);

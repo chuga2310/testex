@@ -149,25 +149,29 @@ function printSearchTable(
   title: string,
   results: { record: { name: string; route: string | null; dataTestIds: string[] }; score: number }[]
 ): void {
-  const COL = [4, 24, 16, 36, 7];
+  const COL = [4, 24, 16, 32, 8, 7];
   const header = [
     "#".padEnd(COL[0]),
     "Component".padEnd(COL[1]),
     "Route".padEnd(COL[2]),
     "Test IDs".padEnd(COL[3]),
-    "Score".padEnd(COL[4]),
+    "Conf.".padEnd(COL[4]),
+    "Score".padEnd(COL[5]),
   ].join("  ");
   console.log(`\n${title}\n`);
   console.log(header);
   console.log("─".repeat(header.length));
+  const CONF_ICON: Record<string, string> = { high: "●", medium: "◑", low: "○" };
   results.forEach((r, i) => {
+    const conf = "confidence" in r ? (r as { confidence: string }).confidence : "medium";
     console.log(
       [
         String(i + 1).padEnd(COL[0]),
         r.record.name.slice(0, COL[1]).padEnd(COL[1]),
         (r.record.route ?? "-").slice(0, COL[2]).padEnd(COL[2]),
         r.record.dataTestIds.slice(0, 3).join(", ").slice(0, COL[3]).padEnd(COL[3]),
-        r.score.toFixed(3).padEnd(COL[4]),
+        `${CONF_ICON[conf] ?? "○"} ${conf}`.padEnd(COL[4]),
+        r.score.toFixed(3).padEnd(COL[5]),
       ].join("  ")
     );
   });

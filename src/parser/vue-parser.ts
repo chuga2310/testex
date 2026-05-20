@@ -5,6 +5,7 @@ import {
   extractAriaLabels,
   extractRoutes,
   nameFromFile,
+  extractElementInfos,
 } from "./base.js";
 
 // Vue-specific action patterns: @click, v-on:click, @submit, v-on:submit
@@ -76,6 +77,7 @@ export function parseVueFile(
     relatedApi: [],
     children: [],
     userActions: actions,
+    elements: extractElementInfos(template, dataTestAttrs),
     rawText: content.slice(0, 1000),
   };
 }

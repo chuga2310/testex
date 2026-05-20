@@ -5,6 +5,7 @@ import {
   extractAriaLabels,
   extractRoutes,
   nameFromFile,
+  extractElementInfos,
 } from "./base.js";
 
 // Angular action patterns: (click), (submit), (ngSubmit)
@@ -71,6 +72,7 @@ export function parseHtmlFile(
     relatedApi: [],
     children: [],
     userActions: actions,
+    elements: extractElementInfos(content, dataTestAttrs),
     rawText: content.slice(0, 1000),
   };
 }
