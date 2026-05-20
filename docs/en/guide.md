@@ -196,9 +196,59 @@ Example prompts:
 - *"Find all form submit buttons in the project"*
 - *"Is the login page well covered?"*
 
+### With GitHub Copilot (VS Code 1.102+)
+
+**Requirements:** VS Code 1.102 or later · GitHub Copilot extension (latest)
+
+Create `.vscode/mcp.json` in your project root:
+
+```json
+{
+  "servers": {
+    "testex": {
+      "command": "node",
+      "args": ["/absolute/path/to/testex/dist/cli/index.js", "mcp"]
+    }
+  }
+}
+```
+
+> Note the key difference from Claude Code: Copilot uses `"servers"` (not `"mcpServers"`).
+
+**Steps:**
+
+1. Create or open `.vscode/mcp.json`
+2. Paste the config above with your actual path
+3. A **Start** button appears at the top of the file — click it to launch the server
+4. Open **Copilot Chat** → click the mode dropdown → select **Agent**
+5. The testex tools are now available
+
+**Example prompts:**
+- *"What pages exist in this project?"*
+- *"Generate a Playwright test for the login page"*
+- *"Find all submit buttons and their test IDs"*
+
+**Workspace vs. user config:**
+
+| Level | File | Use for |
+|-------|------|---------|
+| Workspace | `.vscode/mcp.json` | Share with team via git |
+| User | VS Code Settings Sync | Personal config across machines |
+
+Committing `.vscode/mcp.json` is recommended so every team member gets
+the testex tools automatically.
+
 ### With Cursor
 
-Add to Cursor's MCP settings (same `command` + `args` format).
+Add to Cursor's MCP settings (same `command` + `args` format as Claude Code).
+
+### With JetBrains IDEs (public preview)
+
+GitHub Copilot agent mode with MCP support is available in public preview
+for IntelliJ, PyCharm, WebStorm, and other JetBrains IDEs (May 2025+).
+Configuration format differs per IDE — see the
+[JetBrains Copilot MCP docs](https://docs.github.com/copilot/customizing-copilot/using-model-context-protocol/extending-copilot-chat-with-mcp)
+for the current setup steps.
 
 ---
 

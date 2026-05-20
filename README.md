@@ -25,7 +25,11 @@ node dist/cli/index.js stats                   # confirm index
 
 ---
 
-## MCP (Claude Code / Cursor)
+## MCP integration
+
+testex works as an MCP server with **Claude Code**, **GitHub Copilot**, and **Cursor**.
+
+### Claude Code / Cursor
 
 Add to your project's `.mcp.json`:
 
@@ -40,10 +44,25 @@ Add to your project's `.mcp.json`:
 }
 ```
 
-Then ask Claude:
-- *"Find Playwright locators for the checkout submit button"*
-- *"What test IDs are on the login page?"*
-- *"Generate a Playwright test for LoginForm"*
+### GitHub Copilot (VS Code 1.102+)
+
+Add to `.vscode/mcp.json` in your project:
+
+```json
+{
+  "servers": {
+    "testex": {
+      "command": "node",
+      "args": ["/absolute/path/to/testex/dist/cli/index.js", "mcp"]
+    }
+  }
+}
+```
+
+Open **Copilot Chat → Agent mode** to use the tools.
+Commit `.vscode/mcp.json` to share the config with your team.
+
+---
 
 **13 MCP tools** — `get_test_plan`, `generate_playwright_test`, `list_pages`,
 `find_by_action`, `search_components`, `search_test_ids`, `search_multi`,

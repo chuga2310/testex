@@ -196,9 +196,59 @@ Ví dụ câu hỏi:
 - *"Tìm tất cả nút submit trong dự án"*
 - *"Trang login đã có đủ test ID chưa?"*
 
+### Với GitHub Copilot (VS Code 1.102+)
+
+**Yêu cầu:** VS Code 1.102 trở lên · GitHub Copilot extension (phiên bản mới nhất)
+
+Tạo file `.vscode/mcp.json` ở thư mục gốc dự án:
+
+```json
+{
+  "servers": {
+    "testex": {
+      "command": "node",
+      "args": ["/đường/dẫn/tuyệt/đối/tới/testex/dist/cli/index.js", "mcp"]
+    }
+  }
+}
+```
+
+> **Lưu ý quan trọng:** Copilot dùng key `"servers"`, khác với Claude Code dùng `"mcpServers"`.
+
+**Các bước thực hiện:**
+
+1. Tạo hoặc mở `.vscode/mcp.json`
+2. Paste config trên với đường dẫn thực tế của bạn
+3. Nút **Start** xuất hiện ở đầu file — click để khởi động server
+4. Mở **Copilot Chat** → click dropdown chọn mode → chọn **Agent**
+5. Các tools của testex đã sẵn sàng sử dụng
+
+**Ví dụ câu hỏi:**
+- *"Dự án này có những trang nào?"*
+- *"Generate Playwright test cho trang login"*
+- *"Tìm tất cả nút submit và test ID của chúng"*
+
+**Workspace vs. user config:**
+
+| Cấp độ | File | Dùng khi nào |
+|--------|------|-------------|
+| Workspace | `.vscode/mcp.json` | Chia sẻ với team qua git |
+| User | VS Code Settings Sync | Config cá nhân, đồng bộ giữa các máy |
+
+Nên commit `.vscode/mcp.json` vào repo để mọi thành viên trong team
+đều tự động có testex tools mà không cần cấu hình thêm.
+
 ### Với Cursor
 
-Thêm vào cài đặt MCP của Cursor với cùng format `command` + `args`.
+Thêm vào cài đặt MCP của Cursor với cùng format `command` + `args` như Claude Code.
+
+### Với JetBrains IDEs (public preview)
+
+GitHub Copilot agent mode với MCP đang ở public preview cho IntelliJ, PyCharm,
+WebStorm và các IDE JetBrains khác (từ tháng 5/2025). Format cấu hình khác
+mỗi IDE — xem
+[tài liệu JetBrains Copilot MCP](https://docs.github.com/copilot/customizing-copilot/using-model-context-protocol/extending-copilot-chat-with-mcp)
+để biết các bước cụ thể.
 
 ---
 
