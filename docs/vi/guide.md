@@ -39,29 +39,62 @@ Không có network call sau khi `npm install`.
 
 ## 2. Cài đặt
 
+### Cài đặt global (khuyến nghị)
+
+Cài một lần, dùng được từ bất kỳ dự án nào:
+
 ```bash
 git clone https://github.com/chuga2310/testex
 cd testex
 npm install
+npm link        # đăng ký lệnh `testex` global
+```
+
+Kiểm tra:
+```bash
+testex --version
+# → 0.1.0
+```
+
+### Không dùng global install
+
+Nếu không muốn dùng `npm link`, gọi trực tiếp binary:
+
+```bash
+node /đường/dẫn/tới/testex/dist/cli/index.js --version
 ```
 
 `npm install` tự động thực hiện 2 bước:
 1. Compile TypeScript → `dist/`
 2. Tải ONNX model vào `./models/` (1 lần duy nhất, ~32 MB)
 
-Kiểm tra cài đặt:
-```bash
-node dist/cli/index.js --version
-```
-
 ---
 
 ## 3. Index dự án
 
-### Index cơ bản
+### Cài đặt một lệnh (khuyến nghị)
+
+Chạy bên trong **dự án của bạn** (không phải thư mục testex):
 
 ```bash
-node dist/cli/index.js index /đường/dẫn/tới/src
+testex init
+```
+
+Lệnh này thực hiện 3 việc cùng lúc:
+1. Tự động phát hiện thư mục nguồn (`src/`, `app/`, `pages/`, hoặc `components/`)
+2. Index toàn bộ components
+3. Tạo `.vscode/mcp.json` cho GitHub Copilot
+
+Tùy chọn:
+```bash
+testex init --src ./frontend   # chỉ định thư mục nguồn
+testex init --force            # ghi đè .vscode/mcp.json đã có
+```
+
+### Index thủ công
+
+```bash
+testex index /đường/dẫn/tới/src
 ```
 
 testex duyệt toàn bộ thư mục và phân tích mọi file `.tsx`, `.jsx`, `.ts`, `.js`,
@@ -70,19 +103,19 @@ testex duyệt toàn bộ thư mục và phân tích mọi file `.tsx`, `.jsx`, 
 ### Re-index sau khi thay đổi code
 
 ```bash
-node dist/cli/index.js index /đường/dẫn/src --reset   # xóa index cũ + rebuild
+testex index /đường/dẫn/src --reset   # xóa index cũ + rebuild
 ```
 
 ### Watch — tự động re-index khi lưu file
 
 ```bash
-node dist/cli/index.js watch /đường/dẫn/src
+testex watch /đường/dẫn/src
 ```
 
 ### Xác nhận đã index thành công
 
 ```bash
-node dist/cli/index.js stats
+testex stats
 # → Total components : 48
 # → Total test IDs   : 213
 ```
@@ -94,25 +127,33 @@ node dist/cli/index.js stats
 
 ## 4. CLI reference
 
+### `init` — Cài đặt dự án trong một lệnh
+
+```bash
+testex init                    # tự phát hiện src/, tạo .vscode/mcp.json, index
+testex init --src ./frontend   # chỉ định thư mục nguồn
+testex init --force            # ghi đè .vscode/mcp.json đã có
+```
+
 ### `search` — Tìm kiếm
 
 ```bash
 # Tìm kiếm ngữ nghĩa (natural language)
-node dist/cli/index.js search "nút submit đăng nhập"
-node dist/cli/index.js search "form thanh toán"
+testex search "nút submit đăng nhập"
+testex search "form thanh toán"
 
 # Tìm chính xác theo tên test ID
-node dist/cli/index.js search "login-btn" --test-ids
+testex search "login-btn" --test-ids
 
 # Union search — embed từng keyword riêng, merge kết quả tốt nhất
 # Dùng khi các keyword không liên quan đến nhau
-node dist/cli/index.js search login --union checkout --union register
+testex search login --union checkout --union register
 
 # AND filter — chỉ trả về component chứa TẤT CẢ các test ID này
-node dist/cli/index.js search email --must password --must submit
+testex search email --must password --must submit
 
 # Giới hạn số kết quả
-node dist/cli/index.js search "button" --limit 20
+testex search "button" --limit 20
 ```
 
 Kết quả tìm kiếm có cột **confidence** (độ tin cậy):
@@ -133,7 +174,7 @@ Kết quả tìm kiếm có cột **confidence** (độ tin cậy):
 ### `test-context` — Lấy Playwright locators
 
 ```bash
-node dist/cli/index.js test-context LoginForm
+testex test-context LoginForm
 ```
 
 Output:
@@ -153,20 +194,20 @@ Actions   : submit
 ### `stats` — Thống kê index
 
 ```bash
-node dist/cli/index.js stats
+testex stats
 ```
 
 ### `watch` — Theo dõi thay đổi
 
 ```bash
-node dist/cli/index.js watch ./src   # re-index khi file thay đổi
+testex watch ./src   # re-index khi file thay đổi
 ```
 
 ### `serve` / `mcp`
 
 ```bash
-node dist/cli/index.js serve    # khởi động REST API trên :8000
-node dist/cli/index.js mcp      # khởi động MCP server qua stdio
+testex serve    # khởi động REST API trên :8000
+testex mcp      # khởi động MCP server qua stdio
 ```
 
 ---
@@ -181,8 +222,8 @@ Thêm vào `.mcp.json` ở thư mục gốc dự án của bạn:
 {
   "mcpServers": {
     "testex": {
-      "command": "node",
-      "args": ["/đường/dẫn/tuyệt/đối/tới/testex/dist/cli/index.js", "mcp"]
+      "command": "testex",
+      "args": ["mcp"]
     }
   }
 }
@@ -200,14 +241,24 @@ Ví dụ câu hỏi:
 
 **Yêu cầu:** VS Code 1.102 trở lên · GitHub Copilot extension (phiên bản mới nhất)
 
-Tạo file `.vscode/mcp.json` ở thư mục gốc dự án:
+Cách nhanh nhất là dùng `testex init` — chạy một lần trong dự án của bạn:
+
+```bash
+cd /dự-án-của-bạn
+testex init
+```
+
+Lệnh này tự tạo `.vscode/mcp.json` và index source code.
+
+Nếu muốn tạo thủ công:
 
 ```json
 {
   "servers": {
     "testex": {
-      "command": "node",
-      "args": ["/đường/dẫn/tuyệt/đối/tới/testex/dist/cli/index.js", "mcp"]
+      "type": "stdio",
+      "command": "testex",
+      "args": ["mcp"]
     }
   }
 }
@@ -217,9 +268,9 @@ Tạo file `.vscode/mcp.json` ở thư mục gốc dự án:
 
 **Các bước thực hiện:**
 
-1. Tạo hoặc mở `.vscode/mcp.json`
-2. Paste config trên với đường dẫn thực tế của bạn
-3. Nút **Start** xuất hiện ở đầu file — click để khởi động server
+1. Chạy `testex init` (hoặc tạo `.vscode/mcp.json` thủ công)
+2. Mở `.vscode/mcp.json` trong VS Code — nút **Start** xuất hiện ở đầu file
+3. Click **Start** để khởi động server
 4. Mở **Copilot Chat** → click dropdown chọn mode → chọn **Agent**
 5. Các tools của testex đã sẵn sàng sử dụng
 
@@ -317,7 +368,7 @@ Trả về mọi thứ cần thiết trong 1 lần gọi:
 ## 7. REST API
 
 ```bash
-node dist/cli/index.js serve
+testex serve
 # → Đang lắng nghe tại http://0.0.0.0:8000
 ```
 

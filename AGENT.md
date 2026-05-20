@@ -132,15 +132,16 @@ npm run dev -- index ./src   # chạy trực tiếp từ TypeScript (tsx)
 npm run build                # compile sang dist/
 
 # Sử dụng
-node dist/cli/index.js index <path>            # index project
-node dist/cli/index.js index <path> --reset    # xóa và re-index
-node dist/cli/index.js search "login button"   # tìm kiếm
-node dist/cli/index.js search "id" --test-ids  # tìm test ID
-node dist/cli/index.js test-context LoginForm  # lấy Playwright locators
-node dist/cli/index.js stats                   # thống kê
-node dist/cli/index.js watch <path>            # incremental watch
-node dist/cli/index.js mcp                     # MCP server (stdio)
-node dist/cli/index.js serve                   # REST API :8000
+testex init                            # set up project (index + create .vscode/mcp.json)
+testex index <path>                    # index project
+testex index <path> --reset            # xóa và re-index
+testex search "login button"           # tìm kiếm
+testex search "id" --test-ids          # tìm test ID
+testex test-context LoginForm          # lấy Playwright locators
+testex stats                           # thống kê
+testex watch <path>                    # incremental watch
+testex mcp                             # MCP server (stdio)
+testex serve                           # REST API :8000
 
 # Tests
 npx tsx tests/parser.test.ts                   # 37 tests, không cần model

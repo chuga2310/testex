@@ -23,7 +23,7 @@ Before calling any tool, confirm the index exists:
 
 If `total_components = 0` → ask user to run:
 ```bash
-node dist/cli/index.js index <path-to-src>
+testex index <path-to-src>
 ```
 
 ---

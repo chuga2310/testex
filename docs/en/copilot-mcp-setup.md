@@ -18,44 +18,55 @@ inside GitHub Copilot Chat (VS Code).
 
 ---
 
-## Step 1 — Install testex
+## Step 1 — Install testex globally
 
-Clone and install the project once. After this, testex lives on your machine
-and every project can point to the same binary.
+Clone and install once. `npm link` makes `testex` available as a global command
+so every project can use it without absolute paths.
 
 ```bash
-git clone https://github.com/chuga2310/testex /path/to/testex
-cd /path/to/testex
+git clone https://github.com/chuga2310/testex
+cd testex
 npm install
+npm link
 ```
 
 `npm install` automatically:
 1. Compiles TypeScript → `dist/`
 2. Downloads the ONNX embedding model into `models/` (~32 MB, one-time)
 
-Verify the build succeeded:
+Verify:
 
 ```bash
-node dist/cli/index.js --version
-# → testex/0.1.0
+testex --version
+# → 0.1.0
 ```
 
 ---
 
-## Step 2 — Index your project's source code
+## Step 2 — Set up your project with one command
 
 Run this from inside **your project** (not the testex repo):
 
 ```bash
-node /path/to/testex/dist/cli/index.js index ./src
+cd /your-project
+testex init
 ```
 
-Replace `./src` with the actual path to your UI source directory.
+`testex init` does three things at once:
+1. Auto-detects your source directory (`src/`, `app/`, `pages/`, or `components/`)
+2. Indexes all UI components
+3. Creates `.vscode/mcp.json` configured for GitHub Copilot
 
-Confirm the index:
+**Options:**
+```bash
+testex init --src ./frontend   # specify source directory
+testex init --force            # overwrite existing .vscode/mcp.json
+```
+
+Confirm indexing succeeded:
 
 ```bash
-node /path/to/testex/dist/cli/index.js stats
+testex stats
 # → Total components : 48
 # → Total test IDs   : 213
 ```
@@ -66,49 +77,17 @@ attributes.
 
 ---
 
-## Step 3 — Create `.vscode/mcp.json`
+## Step 3 — Review `.vscode/mcp.json`
 
-In the root of **your project** (not the testex repo), create this file:
-
-```bash
-mkdir -p .vscode
-touch .vscode/mcp.json
-```
-
-Paste the following content, replacing the path with your actual testex location:
+`testex init` creates this file automatically. You can review or edit it:
 
 ```json
 {
   "servers": {
     "testex": {
       "type": "stdio",
-      "command": "node",
-      "args": ["/absolute/path/to/testex/dist/cli/index.js", "mcp"],
-      "description": "Local AI index for data-test IDs and UI components"
-    }
-  }
-}
-```
-
-**Find your absolute path:**
-
-```bash
-# macOS / Linux
-realpath /path/to/testex/dist/cli/index.js
-
-# Windows (PowerShell)
-Resolve-Path .\testex\dist\cli\index.js
-```
-
-**Example (macOS):**
-
-```json
-{
-  "servers": {
-    "testex": {
-      "type": "stdio",
-      "command": "node",
-      "args": ["/Users/yourname/tools/testex/dist/cli/index.js", "mcp"],
+      "command": "testex",
+      "args": ["mcp"],
       "description": "Local AI index for data-test IDs and UI components"
     }
   }
@@ -227,8 +206,8 @@ Copy to your project:
 
 ```bash
 mkdir -p .github/agents
-cp /path/to/testex/agents/playwright-writer.md .github/agents/
-cp /path/to/testex/agents/testex-explorer.md   .github/agents/
+cp $(npm root -g)/testex/agents/playwright-writer.md .github/agents/
+cp $(npm root -g)/testex/agents/testex-explorer.md   .github/agents/
 ```
 
 Then invoke by name in Copilot Chat Agent mode:
@@ -249,10 +228,10 @@ Re-run indexing whenever you add or rename components:
 
 ```bash
 # Full re-index
-node /path/to/testex/dist/cli/index.js index ./src --reset
+testex index ./src --reset
 
 # Or use watch mode (auto re-indexes on file save)
-node /path/to/testex/dist/cli/index.js watch ./src
+testex watch ./src
 ```
 
 For teams, add a re-index step to your CI pipeline or a pre-commit hook.
@@ -263,17 +242,17 @@ For teams, add a re-index step to your CI pipeline or a pre-commit hook.
 
 Commit `.vscode/mcp.json` to your repository. Every teammate with VS Code
 1.102+ and the Copilot extension will get testex tools automatically after
-cloning.
-
-Ensure the path in `args` works for everyone on the team — use a shared
-install location or instruct teammates to update the path after cloning testex.
+cloning — as long as they also run `npm link` after installing testex.
 
 **Recommended team setup:**
 
-1. Each developer clones testex to the same conventional path
-   (e.g., `~/tools/testex`)
-2. Commit `.vscode/mcp.json` with that path
-3. Add a note in your project's `README.md`:
+1. Each developer installs testex globally once:
+   ```bash
+   git clone https://github.com/chuga2310/testex && cd testex && npm install && npm link
+   ```
+2. Run `testex init` inside the project (creates `.vscode/mcp.json` + indexes `src/`)
+3. Commit `.vscode/mcp.json`
+4. Add a note in your project's `README.md`:
 
 ```markdown
 ## Test tooling
@@ -281,8 +260,8 @@ install location or instruct teammates to update the path after cloning testex.
 This project uses testex for AI-assisted test ID discovery.
 
 Setup:
-1. `git clone ... ~/tools/testex && cd ~/tools/testex && npm install`
-2. `node ~/tools/testex/dist/cli/index.js index ./src`
+1. `git clone https://github.com/chuga2310/testex && cd testex && npm install && npm link`
+2. `cd /your-project && testex init`
 3. Open VS Code — testex is available in Copilot Chat Agent mode
 ```
 
@@ -309,9 +288,9 @@ Setup:
 
 ### Server shows red / failed to start
 
-- Run `node /path/to/testex/dist/cli/index.js mcp` in a terminal to see the error
-- Common causes: wrong path in `args`, Node.js too old, `dist/` not built
-- Rebuild: `cd /path/to/testex && npm run build`
+- Run `testex mcp` in a terminal to see the raw error
+- Common causes: `npm link` not run, Node.js too old, `dist/` not built
+- Rebuild: `cd /path/to/testex && npm run build && npm link`
 
 ### Tools appear but return errors
 
@@ -324,18 +303,15 @@ Setup:
 ## Quick reference
 
 ```bash
-# Install (once)
-git clone ... /path/to/testex && cd /path/to/testex && npm install
+# Install once (global)
+git clone https://github.com/chuga2310/testex && cd testex && npm install && npm link
 
-# Index your project
-node /path/to/testex/dist/cli/index.js index /your/project/src
+# Set up any project
+cd /your-project
+testex init         # indexes src/, creates .vscode/mcp.json
 
 # Verify
-node /path/to/testex/dist/cli/index.js stats
-
-# Create VS Code config
-echo '{"servers":{"testex":{"type":"stdio","command":"node","args":["/path/to/testex/dist/cli/index.js","mcp"]}}}' \
-  > /your/project/.vscode/mcp.json
+testex stats
 ```
 
 Then open VS Code → Copilot Chat → Agent mode → start asking.

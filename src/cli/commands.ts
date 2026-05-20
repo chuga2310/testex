@@ -1,5 +1,5 @@
-import { resolve } from "path";
-import { existsSync } from "fs";
+import { resolve, join } from "path";
+import { existsSync, mkdirSync, writeFileSync, readFileSync } from "fs";
 import { config } from "../config.js";
 import { scanDirectory } from "../parser/react-parser.js";
 import { normalize } from "../parser/normalizer.js";
@@ -249,4 +249,60 @@ export async function cmdWatch(path: string): Promise<void> {
     await db.upsert(records, vectors);
     console.log(`✓ Updated ${records.length} component(s)`);
   });
+}
+
+// ── init ─────────────────────────────────────────────────────────────────────
+export async function cmdInit(opts: { src?: string; force?: boolean }): Promise<void> {
+  const cwd = process.cwd();
+  const vscodeDir = join(cwd, ".vscode");
+  const mcpJsonPath = join(vscodeDir, "mcp.json");
+
+  // ── create .vscode/mcp.json ──────────────────────────────────────────────
+  if (!existsSync(vscodeDir)) {
+    mkdirSync(vscodeDir, { recursive: true });
+  }
+
+  if (existsSync(mcpJsonPath) && !opts.force) {
+    console.log(`ℹ  .vscode/mcp.json already exists. Use --force to overwrite.`);
+  } else {
+    const mcpConfig = {
+      servers: {
+        testex: {
+          type: "stdio",
+          command: "testex",
+          args: ["mcp"],
+          description: "Local AI index for data-test IDs and UI components",
+        },
+      },
+    };
+    writeFileSync(mcpJsonPath, JSON.stringify(mcpConfig, null, 2) + "\n");
+    console.log(`✓ Created .vscode/mcp.json`);
+  }
+
+  // ── optionally index source ──────────────────────────────────────────────
+  const srcPath = opts.src ?? autoDetectSrc(cwd);
+  if (srcPath) {
+    console.log(`\nIndexing ${srcPath}...`);
+    await cmdIndex(srcPath, {});
+  } else {
+    console.log(`\nNext step — index your source code:`);
+    console.log(`  testex index ./src`);
+  }
+
+  // ── print next steps ─────────────────────────────────────────────────────
+  console.log(`\n─────────────────────────────────────────`);
+  console.log(`✓ testex is ready for GitHub Copilot`);
+  console.log(`\n  1. Open .vscode/mcp.json in VS Code`);
+  console.log(`  2. Click the "Start" button that appears`);
+  console.log(`  3. Open Copilot Chat → Agent mode`);
+  console.log(`\nExample prompts:`);
+  console.log(`  "What test IDs are on the login page?"`);
+  console.log(`  "Generate a Playwright test for CheckoutPage"`);
+}
+
+function autoDetectSrc(cwd: string): string | null {
+  for (const candidate of ["src", "app", "pages", "components"]) {
+    if (existsSync(join(cwd, candidate))) return candidate;
+  }
+  return null;
 }

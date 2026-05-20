@@ -14,20 +14,38 @@ No cloud API. No Docker. ONNX model bundled (~32 MB). Runs on `npm install`.
 ## Quick start
 
 ```bash
+# 1. Install testex globally (once)
 git clone https://github.com/chuga2310/testex
-cd testex
-npm install                                    # builds + model ready
+cd testex && npm install && npm link
 
-node dist/cli/index.js index /path/to/src      # index your project
-node dist/cli/index.js search "login form"     # semantic search
-node dist/cli/index.js stats                   # confirm index
+# 2. In any project — one command does everything
+cd /your-react-project
+testex init           # indexes src/, creates .vscode/mcp.json
 ```
+
+Then open **Copilot Chat → Agent mode** and start asking:
+- *"What test IDs are on the login page?"*
+- *"Generate a Playwright test for CheckoutPage"*
 
 ---
 
 ## MCP integration
 
 testex works as an MCP server with **Claude Code**, **GitHub Copilot**, and **Cursor**.
+
+### GitHub Copilot (VS Code 1.102+)
+
+Run `testex init` inside your project — it creates `.vscode/mcp.json` automatically
+and indexes your source in one step:
+
+```bash
+testex init                  # auto-detects src/, app/, pages/
+testex init --src ./frontend # specify source directory
+```
+
+Then click **Start** in the generated `.vscode/mcp.json` file, switch Copilot Chat
+to **Agent mode**, and the tools are ready.
+Commit `.vscode/mcp.json` to share with your team.
 
 ### Claude Code / Cursor
 
@@ -37,30 +55,12 @@ Add to your project's `.mcp.json`:
 {
   "mcpServers": {
     "testex": {
-      "command": "node",
-      "args": ["/absolute/path/to/testex/dist/cli/index.js", "mcp"]
+      "command": "testex",
+      "args": ["mcp"]
     }
   }
 }
 ```
-
-### GitHub Copilot (VS Code 1.102+)
-
-Add to `.vscode/mcp.json` in your project:
-
-```json
-{
-  "servers": {
-    "testex": {
-      "command": "node",
-      "args": ["/absolute/path/to/testex/dist/cli/index.js", "mcp"]
-    }
-  }
-}
-```
-
-Open **Copilot Chat → Agent mode** to use the tools.
-Commit `.vscode/mcp.json` to share the config with your team.
 
 ---
 
@@ -74,24 +74,29 @@ Commit `.vscode/mcp.json` to share the config with your team.
 ## CLI reference
 
 ```bash
+# Setup (run once per project)
+testex init                        # auto-detect src/, create .vscode/mcp.json
+testex init --src ./src            # specify source directory
+testex init --force                # overwrite existing .vscode/mcp.json
+
 # Indexing
-node dist/cli/index.js index <path>             # index project
-node dist/cli/index.js index <path> --reset     # drop + re-index
-node dist/cli/index.js watch <path>             # live re-index on save
+testex index <path>                # index project
+testex index <path> --reset        # drop + re-index
+testex watch <path>                # live re-index on save
 
 # Search
-node dist/cli/index.js search "query"                     # semantic
-node dist/cli/index.js search "id" --test-ids             # exact substring
-node dist/cli/index.js search login --union checkout      # multi-keyword
-node dist/cli/index.js search email --must password       # AND filter
+testex search "query"              # semantic
+testex search "id" --test-ids      # exact substring
+testex search login --union checkout  # multi-keyword
+testex search email --must password   # AND filter
 
 # Inspect
-node dist/cli/index.js test-context <component>  # Playwright locators
-node dist/cli/index.js stats                     # index stats
+testex test-context <component>    # Playwright locators
+testex stats                       # index stats
 
 # Servers
-node dist/cli/index.js mcp                       # MCP server (stdio)
-node dist/cli/index.js serve                     # REST API :8000
+testex mcp                         # MCP server (stdio)
+testex serve                       # REST API :8000
 ```
 
 ---

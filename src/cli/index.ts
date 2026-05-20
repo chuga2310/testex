@@ -93,6 +93,16 @@ program
     await startMcpServer();
   });
 
+program
+  .command("init")
+  .description("Set up testex in the current project (creates .vscode/mcp.json, auto-indexes src)")
+  .option("-s, --src <path>", "Source directory to index (auto-detected if omitted)")
+  .option("-f, --force", "Overwrite existing .vscode/mcp.json")
+  .action(async (opts: { src?: string; force?: boolean }) => {
+    const { cmdInit } = await import("./commands.js");
+    await cmdInit(opts);
+  });
+
 program.parseAsync(process.argv).catch((err: unknown) => {
   console.error(err);
   process.exit(1);

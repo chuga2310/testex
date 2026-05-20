@@ -39,29 +39,62 @@ No network call is made after `npm install`.
 
 ## 2. Installation
 
+### Install globally (recommended)
+
+Install once and use `testex` from any project:
+
 ```bash
 git clone https://github.com/chuga2310/testex
 cd testex
 npm install
+npm link        # makes `testex` available globally
+```
+
+Verify:
+```bash
+testex --version
+# → 0.1.0
+```
+
+### Without global install
+
+If you prefer not to use `npm link`, call the binary directly:
+
+```bash
+node /path/to/testex/dist/cli/index.js --version
 ```
 
 `npm install` runs two steps automatically:
 1. Compiles TypeScript → `dist/`
 2. Downloads the ONNX model into `./models/` (once, ~32 MB)
 
-Verify the setup:
-```bash
-node dist/cli/index.js --version
-```
-
 ---
 
 ## 3. Indexing your project
 
-### Basic index
+### One command setup (recommended)
+
+Run inside **your project** (not the testex repo):
 
 ```bash
-node dist/cli/index.js index /path/to/your/src
+testex init
+```
+
+This single command:
+1. Auto-detects your source directory (`src/`, `app/`, `pages/`, or `components/`)
+2. Indexes all components
+3. Creates `.vscode/mcp.json` for GitHub Copilot
+
+Options:
+```bash
+testex init --src ./frontend   # specify source directory
+testex init --force            # overwrite existing .vscode/mcp.json
+```
+
+### Manual indexing
+
+```bash
+testex index /path/to/your/src
 ```
 
 testex walks the directory and parses every `.tsx`, `.jsx`, `.ts`, `.js`,
@@ -70,19 +103,19 @@ testex walks the directory and parses every `.tsx`, `.jsx`, `.ts`, `.js`,
 ### Re-index after changes
 
 ```bash
-node dist/cli/index.js index /path/to/src --reset   # drop + rebuild
+testex index /path/to/src --reset   # drop + rebuild
 ```
 
 ### Live watch (auto re-index on save)
 
 ```bash
-node dist/cli/index.js watch /path/to/src
+testex watch /path/to/src
 ```
 
 ### Verify
 
 ```bash
-node dist/cli/index.js stats
+testex stats
 # → Total components : 48
 # → Total test IDs   : 213
 ```
@@ -91,25 +124,33 @@ node dist/cli/index.js stats
 
 ## 4. CLI reference
 
+### `init` — one-command project setup
+
+```bash
+testex init                    # auto-detect src/, create .vscode/mcp.json, index
+testex init --src ./frontend   # specify source directory
+testex init --force            # overwrite existing .vscode/mcp.json
+```
+
 ### `search`
 
 ```bash
 # Semantic search (natural language)
-node dist/cli/index.js search "login submit button"
-node dist/cli/index.js search "form đăng nhập"
+testex search "login submit button"
+testex search "form đăng nhập"
 
 # Exact substring match on test IDs
-node dist/cli/index.js search "login-btn" --test-ids
+testex search "login-btn" --test-ids
 
 # Union search — embed each keyword separately, merge best scores
 # Use when keywords are unrelated
-node dist/cli/index.js search login --union checkout --union register
+testex search login --union checkout --union register
 
 # AND filter — only components containing ALL test IDs
-node dist/cli/index.js search email --must password --must submit
+testex search email --must password --must submit
 
 # Limit results
-node dist/cli/index.js search "button" --limit 20
+testex search "button" --limit 20
 ```
 
 Search output shows a **confidence column**:
@@ -132,7 +173,7 @@ Search output shows a **confidence column**:
 Generate Playwright locators for a component:
 
 ```bash
-node dist/cli/index.js test-context LoginForm
+testex test-context LoginForm
 ```
 
 Output:
@@ -150,20 +191,20 @@ Locators:
 ### `stats`
 
 ```bash
-node dist/cli/index.js stats
+testex stats
 ```
 
 ### `watch`
 
 ```bash
-node dist/cli/index.js watch ./src   # re-indexes changed files on save
+testex watch ./src   # re-indexes changed files on save
 ```
 
 ### `serve` / `mcp`
 
 ```bash
-node dist/cli/index.js serve          # REST API on :8000
-node dist/cli/index.js mcp            # MCP server over stdio
+testex serve          # REST API on :8000
+testex mcp            # MCP server over stdio
 ```
 
 ---
@@ -178,8 +219,8 @@ Add to `.mcp.json` in your project root:
 {
   "mcpServers": {
     "testex": {
-      "command": "node",
-      "args": ["/absolute/path/to/testex/dist/cli/index.js", "mcp"]
+      "command": "testex",
+      "args": ["mcp"]
     }
   }
 }
@@ -200,26 +241,36 @@ Example prompts:
 
 **Requirements:** VS Code 1.102 or later · GitHub Copilot extension (latest)
 
-Create `.vscode/mcp.json` in your project root:
+The fastest way is `testex init` — run it inside your project once:
+
+```bash
+cd /your-project
+testex init
+```
+
+This creates `.vscode/mcp.json` and indexes your source automatically.
+
+If you need to create the file manually:
 
 ```json
 {
   "servers": {
     "testex": {
-      "command": "node",
-      "args": ["/absolute/path/to/testex/dist/cli/index.js", "mcp"]
+      "type": "stdio",
+      "command": "testex",
+      "args": ["mcp"]
     }
   }
 }
 ```
 
-> Note the key difference from Claude Code: Copilot uses `"servers"` (not `"mcpServers"`).
+> Note: Copilot uses `"servers"` (not `"mcpServers"` like Claude Code).
 
 **Steps:**
 
-1. Create or open `.vscode/mcp.json`
-2. Paste the config above with your actual path
-3. A **Start** button appears at the top of the file — click it to launch the server
+1. Run `testex init` (or create `.vscode/mcp.json` manually)
+2. Open `.vscode/mcp.json` in VS Code — a **Start** button appears at the top
+3. Click **Start** to launch the server
 4. Open **Copilot Chat** → click the mode dropdown → select **Agent**
 5. The testex tools are now available
 
@@ -317,7 +368,7 @@ Returns everything an agent needs in a single call:
 ## 7. REST API
 
 ```bash
-node dist/cli/index.js serve
+testex serve
 # → Listening on http://0.0.0.0:8000
 ```
 
