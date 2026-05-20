@@ -74,4 +74,9 @@ export class EmbeddingPipeline {
     const [vec] = await this.embed([text]);
     return vec;
   }
+
+  /** Embed multiple independent texts (e.g. separate keywords for union search). */
+  async embedBatch(texts: string[]): Promise<number[][]> {
+    return this.embed(texts);
+  }
 }

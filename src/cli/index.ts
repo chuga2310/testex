@@ -36,11 +36,18 @@ program
   .description("Semantic search over indexed components")
   .option("-n, --limit <n>", "Number of results", "10")
   .option("-t, --test-ids", "Search test IDs by substring only")
-  .action(async (query: string, opts: { limit?: string; testIds?: boolean }) => {
+  .option("-u, --union <keywords...>", "Extra keywords (embed each separately, merge best scores)")
+  .option("-m, --must <ids...>", "AND filter: only components containing ALL these test IDs")
+  .action(async (
+    query: string,
+    opts: { limit?: string; testIds?: boolean; union?: string[]; must?: string[] }
+  ) => {
     const { cmdSearch } = await import("./commands.js");
     await cmdSearch(query, {
       limit: opts.limit ? parseInt(opts.limit, 10) : undefined,
       testIds: opts.testIds,
+      union: opts.union,
+      must: opts.must,
     });
   });
 

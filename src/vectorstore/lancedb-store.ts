@@ -126,6 +126,40 @@ export class LanceDBStore {
     }
   }
 
+  /** Multi-keyword union search: embed each keyword separately, merge by best score. */
+  async searchMulti(queryVecs: number[][], limit = 10): Promise<SearchResult[]> {
+    const seen = new Map<string, SearchResult>();
+    for (const vec of queryVecs) {
+      const results = await this.search(vec, limit);
+      for (const r of results) {
+        const existing = seen.get(r.record.id);
+        // keep the best (lowest) distance score
+        if (!existing || r.score < existing.score) {
+          seen.set(r.record.id, r);
+        }
+      }
+    }
+    return [...seen.values()].sort((a, b) => a.score - b.score).slice(0, limit);
+  }
+
+  /** AND filter: returns components containing ALL of the given test IDs. */
+  async searchByAllTestIds(testIds: string[]): Promise<ComponentRecord[]> {
+    if (!testIds.length) return [];
+    const tbl = await this.getTable() as {
+      query(): { where(cond: string): { toArray(): Promise<Row[]> } };
+    } | null;
+    if (!tbl) return [];
+    try {
+      const conditions = testIds
+        .map((id) => `data_test_ids LIKE '%${id}%'`)
+        .join(" AND ");
+      const rows = await tbl.query().where(conditions).toArray();
+      return rows.map(fromRow);
+    } catch {
+      return [];
+    }
+  }
+
   async searchByTestId(testId: string): Promise<ComponentRecord[]> {
     const tbl = await this.getTable() as {
       query(): { where(cond: string): { toArray(): Promise<Row[]> } };

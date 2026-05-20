@@ -71,13 +71,42 @@ export async function cmdIndex(
 }
 
 // ── search ───────────────────────────────────────────────────────────────────
+/**
+ * Search modes:
+ *  default            – semantic vector search (single or space-joined keywords)
+ *  --union kw1 kw2    – embed each keyword separately, merge best scores
+ *  --must  kw1 kw2    – AND filter: components that contain ALL test IDs
+ *  --test-ids         – exact substring match on data-test attribute values
+ */
 export async function cmdSearch(
   query: string,
-  opts: { limit?: number; testIds?: boolean }
+  opts: {
+    limit?: number;
+    testIds?: boolean;
+    must?: string[];   // AND filter keywords
+    union?: string[];  // per-keyword union
+  }
 ): Promise<void> {
   const limit = opts.limit ?? config.searchLimit;
   const db = store();
 
+  // ── mode: --must (AND filter on test IDs) ──────────────────────────────────
+  if (opts.must?.length) {
+    const keywords = [query, ...(opts.must ?? [])].filter(Boolean);
+    const results = await db.searchByAllTestIds(keywords);
+    if (!results.length) {
+      console.log(`No components contain ALL of: ${keywords.join(", ")}`);
+      return;
+    }
+    console.log(`\nAND filter — must contain: ${keywords.join(", ")}\n`);
+    for (const r of results.slice(0, limit)) {
+      console.log(`  ${r.name.padEnd(24)} ${r.dataTestIds.join(", ")}`);
+      console.log(`  ${"".padEnd(24)} ${r.file}`);
+    }
+    return;
+  }
+
+  // ── mode: --test-ids (exact substring match) ───────────────────────────────
   if (opts.testIds) {
     const results = await db.searchByTestId(query);
     if (!results.length) {
@@ -92,13 +121,34 @@ export async function cmdSearch(
     return;
   }
 
-  const vec = await pipeline().embedOne(query);
+  // ── mode: --union (per-keyword vectors, merge best scores) ────────────────
+  const pl = pipeline();
+  if (opts.union?.length) {
+    const keywords = [query, ...(opts.union ?? [])].filter(Boolean);
+    const vecs = await pl.embedBatch(keywords);
+    const results = await db.searchMulti(vecs, limit);
+    if (!results.length) {
+      console.log('No results. Run "testex index <path>" first.');
+      return;
+    }
+    printSearchTable(`Union search: ${keywords.join(" | ")}`, results);
+    return;
+  }
+
+  // ── mode: default semantic search ─────────────────────────────────────────
+  const vec = await pl.embedOne(query);
   const results = await db.search(vec, limit);
   if (!results.length) {
     console.log('No results. Run "testex index <path>" first.');
     return;
   }
+  printSearchTable(`Search: "${query}"`, results);
+}
 
+function printSearchTable(
+  title: string,
+  results: { record: { name: string; route: string | null; dataTestIds: string[] }; score: number }[]
+): void {
   const COL = [4, 24, 16, 36, 7];
   const header = [
     "#".padEnd(COL[0]),
@@ -107,7 +157,7 @@ export async function cmdSearch(
     "Test IDs".padEnd(COL[3]),
     "Score".padEnd(COL[4]),
   ].join("  ");
-  console.log(`\nSearch: "${query}"\n`);
+  console.log(`\n${title}\n`);
   console.log(header);
   console.log("─".repeat(header.length));
   results.forEach((r, i) => {
